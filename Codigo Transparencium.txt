@@ -1,0 +1,300 @@
+import os
+from typing import Dict, Union, Optional
+import json
+from datetime import datetime
+from langchain_community.llms import Ollama
+import numpy as np
+from dotenv import load_dotenv
+import time
+
+class RealEstateAgent:
+    """
+    Agente de IA para análisis de precios inmobiliarios utilizando Ollama.
+    """
+    
+    def _init_(self, model_name: str = "llama2"):
+        """
+        Inicializa el agente con el modelo especificado de Ollama.
+        
+        Args:
+            model_name (str): Nombre del modelo de Ollama a utilizar
+        """
+        self.llm = Ollama(model=model_name)
+        self.price_factors = {
+            'room_weight': 150000,      # Peso por cuarto
+            'bathroom_weight': 200000,   # Peso por baño
+            'garage_weight': 300000,     # Peso por cochera
+            'sqm_weight': 15000,         # Peso por metro cuadrado
+            'services_weight': 250000    # Peso por servicios básicos
+        }
+
+    def clear_screen(self):
+        """Limpia la pantalla de la consola."""
+        os.system('cls' if os.name == 'nt' else 'clear')
+
+    def print_header(self):
+        """Muestra el encabezado del programa."""
+        self.clear_screen()
+        print("="*50)
+        print("   Sistema de Análisis de Precios Inmobiliarios")
+        print("="*50)
+        print("\nBienvenido a PRECIUM.")
+        print("Este sistema le ayudará a estimar el valor de una propiedad.\n")
+
+    def input_with_validation(self, prompt: str, value_type: type, min_value: Optional[float] = None) -> Union[int, float, bool]:
+        """
+        Solicita y valida la entrada del usuario.
+        
+        Args:
+            prompt (str): Mensaje para el usuario
+            value_type (type): Tipo de dato esperado
+            min_value (float, optional): Valor mínimo permitido
+            
+        Returns:
+            Union[int, float, bool]: Valor validado
+        """
+        while True:
+            try:
+                if value_type == bool:
+                    response = input(prompt + " (s/n): ").lower()
+                    return response == 's'
+                else:
+                    value = value_type(input(prompt + ": "))
+                    if min_value is not None and value < min_value:
+                        print(f"Error: El valor debe ser mayor o igual a {min_value}")
+                        continue
+                    return value
+            except ValueError:
+                print("Error: Por favor ingrese un valor válido.")
+
+    def get_location_details(self) -> Dict[str, str]:
+        """
+        Obtiene los detalles de ubicación de la propiedad.
+        
+        Returns:
+            Dict[str, str]: Detalles de ubicación
+        """
+        print("\n=== Ubicación de la Propiedad ===")
+        return {
+            'estado': input("Estado: "),
+            'ciudad': input("Ciudad: "),
+            'colonia': input("Colonia: "),
+            'calle': input("Calle: ")
+        }
+
+    def get_property_features(self) -> Dict[str, Union[str, bool]]:
+        """
+        Obtiene características adicionales de la propiedad.
+        
+        Returns:
+            Dict[str, Union[str, bool]]: Características de la propiedad
+        """
+        print("\n=== Características Adicionales ===")
+        return {
+            'tipo_propiedad': input("Tipo de propiedad (casa/departamento/terreno): "),
+            'antiguedad': self.input_with_validation("Antigüedad en años", int, 0),
+            'estado_conservacion': input("Estado de conservación (excelente/bueno/regular/malo): "),
+            'acabados': input("Tipo de acabados (básicos/intermedios/lujo): "),
+            'seguridad': self.input_with_validation("¿Cuenta con sistema de seguridad?", bool)
+        }
+
+    def get_user_input(self) -> Dict[str, Union[int, bool, float, str, Dict]]:
+        """
+        Solicita y valida la entrada de datos del usuario.
+        
+        Returns:
+            Dict: Diccionario con los datos completos de la propiedad
+        """
+        self.print_header()
+        
+        try:
+            # Ubicación
+            location = self.get_location_details()
+            
+            # Características básicas
+            print("\n=== Características Básicas ===")
+            basic_features = {
+                'rooms': self.input_with_validation("¿Cuántos cuartos tiene la propiedad?", int, 0),
+                'bathrooms': self.input_with_validation("¿Cuántos baños tiene la propiedad?", float, 0),
+                'garage': self.input_with_validation("¿Tiene cochera?", bool),
+                'square_meters': self.input_with_validation("¿Cuántos metros cuadrados tiene el predio?", float, 1),
+                'basic_services': self.input_with_validation("¿Tiene todos los servicios básicos (agua, luz, drenaje)?", bool)
+            }
+            
+            # Características adicionales
+            additional_features = self.get_property_features()
+            
+            # Combinar toda la información
+            return {
+                'location': location,
+                'basic_features': basic_features,
+                'additional_features': additional_features
+            }
+            
+        except KeyboardInterrupt:
+            print("\n\nOperación cancelada por el usuario.")
+            return None
+
+    def display_analysis_progress(self):
+        """Muestra una barra de progreso durante el análisis."""
+        print("\nAnalizando datos de la propiedad...")
+        for i in range(5):
+            print(".", end="", flush=True)
+            time.sleep(0.5)
+        print("\n")
+
+    def analyze_price(self, property_data: Dict[str, Union[int, bool, float, Dict]]) -> float:
+        """
+        Analiza y estima el precio de la propiedad basado en los datos proporcionados.
+        
+        Args:
+            property_data (Dict): Datos de la propiedad
+            
+        Returns:
+            float: Precio estimado de la propiedad
+        """
+        self.display_analysis_progress()
+        
+        basic_features = property_data['basic_features']
+        
+        # Cálculo base del precio
+        base_price = (
+            basic_features['rooms'] * self.price_factors['room_weight'] +
+            basic_features['bathrooms'] * self.price_factors['bathroom_weight'] +
+            (self.price_factors['garage_weight'] if basic_features['garage'] else 0) +
+            basic_features['square_meters'] * self.price_factors['sqm_weight'] +
+            (self.price_factors['services_weight'] if basic_features['basic_services'] else 0)
+        )
+        
+        # Consulta a Ollama para ajuste de precio
+        prompt = self._generate_analysis_prompt(property_data, base_price)
+        response = self.llm.invoke(prompt)
+        
+        try:
+            adjustment_factor = self._extract_adjustment_factor(response)
+            final_price = base_price * adjustment_factor
+            return final_price
+        except:
+            return base_price
+
+    def display_results(self, property_data: Dict[str, Union[int, bool, float, Dict]], 
+                       estimated_price: float) -> None:
+        """
+        Muestra los resultados del análisis de manera detallada.
+        
+        Args:
+            property_data (Dict): Datos de la propiedad
+            estimated_price (float): Precio estimado
+        """
+        self.clear_screen()
+        print("\n=== Resultados del Análisis ===")
+        print("\nDetalles de la Propiedad:")
+        print(f"Ubicación: {property_data['location']['ciudad']}, {property_data['location']['estado']}")
+        print(f"Colonia: {property_data['location']['colonia']}")
+        print(f"\nCaracterísticas Principales:")
+        print(f"- Cuartos: {property_data['basic_features']['rooms']}")
+        print(f"- Baños: {property_data['basic_features']['bathrooms']}")
+        print(f"- Metros cuadrados: {property_data['basic_features']['square_meters']}")
+        print(f"- Cochera: {'Sí' if property_data['basic_features']['garage'] else 'No'}")
+        print(f"\nPrecio Estimado: ${estimated_price:,.2f}")
+        print("\nNota: Esta estimación es referencial y puede variar según condiciones del mercado.")
+
+    def _generate_analysis_prompt(self, property_data: Dict[str, Union[int, bool, float, Dict]], 
+                                base_price: float) -> str:
+        """
+        Genera el prompt para consultar a Ollama.
+        
+        Args:
+            property_data (Dict): Datos de la propiedad
+            base_price (float): Precio base calculado
+            
+        Returns:
+            str: Prompt generado
+        """
+        return f"""
+        Analiza los siguientes datos de una propiedad y sugiere un factor de ajuste entre 0.8 y 1.2:
+        
+        Ubicación:
+        - Estado: {property_data['location']['estado']}
+        - Ciudad: {property_data['location']['ciudad']}
+        - Colonia: {property_data['location']['colonia']}
+        
+        Características Básicas:
+        - Cuartos: {property_data['basic_features']['rooms']}
+        - Baños: {property_data['basic_features']['bathrooms']}
+        - Cochera: {'Sí' if property_data['basic_features']['garage'] else 'No'}
+        - Metros cuadrados: {property_data['basic_features']['square_meters']}
+        - Servicios básicos: {'Sí' if property_data['basic_features']['basic_services'] else 'No'}
+        
+        Características Adicionales:
+        - Tipo de propiedad: {property_data['additional_features']['tipo_propiedad']}
+        - Antigüedad: {property_data['additional_features']['antiguedad']} años
+        - Estado de conservación: {property_data['additional_features']['estado_conservacion']}
+        - Acabados: {property_data['additional_features']['acabados']}
+        - Sistema de seguridad: {'Sí' if property_data['additional_features']['seguridad'] else 'No'}
+        
+        Precio base calculado: ${base_price:,.2f}
+        
+        Responde solo con el factor de ajuste como número decimal.
+        """
+
+    def save_analysis(self, property_data: Dict[str, Union[int, bool, float, Dict]], 
+                     estimated_price: float, filename: Optional[str] = None) -> None:
+        """
+        Guarda el análisis en un archivo JSON.
+        
+        Args:
+            property_data (Dict): Datos de la propiedad
+            estimated_price (float): Precio estimado
+            filename (str, optional): Nombre del archivo
+        """
+        if filename is None:
+            filename = f"analisis_precio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            
+        analysis_data = {
+            'fecha_analisis': datetime.now().isoformat(),
+            'datos_propiedad': property_data,
+            'precio_estimado': estimated_price
+        }
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(analysis_data, f, ensure_ascii=False, indent=4)
+        
+        print(f"\nAnálisis guardado en: {filename}")
+
+def main():
+    """
+    Función principal que ejecuta el agente de análisis de precios.
+    """
+    try:
+        # Inicializar el agente
+        agent = RealEstateAgent()
+        
+        while True:
+            # Obtener datos del usuario
+            property_data = agent.get_user_input()
+            
+            if property_data is None:
+                break
+                
+            # Realizar análisis
+            estimated_price = agent.analyze_price(property_data)
+            
+            # Mostrar resultados
+            agent.display_results(property_data, estimated_price)
+            
+            # Guardar análisis
+            agent.save_analysis(property_data, estimated_price)
+            
+            # Preguntar si desea realizar otro análisis
+            if not agent.input_with_validation("\n¿Desea realizar otro análisis?", bool):
+                break
+        
+        print("\n¡Gracias por utilizar nuestro sistema de análisis inmobiliario!")
+        
+    except Exception as e:
+        print(f"\nError en la ejecución: {str(e)}")
+        print("Por favor, contacte al soporte técnico.")
+
+if _name_ == "_main_":
+    main()
